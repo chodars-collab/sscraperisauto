@@ -946,6 +946,11 @@ class App(tk.Tk):
                 if ads:
                     now_dt = datetime.now(LOCAL_TZ)
                     inserted_count = 0
+                    ads = sorted(
+                        ads,
+                        key=lambda a: a.published_at or now_dt,
+                        reverse=True,
+                    )
                     for ad in ads:
                         if ad.ad_id in self.displayed_ad_ids:
                             continue
@@ -970,6 +975,7 @@ class App(tk.Tk):
                         self.displayed_ad_ids.add(ad.ad_id)
                         inserted_count += 1
                         self._apply_row_style(row_id)
+                    self._sort_rows_by_added_at_desc()
                     if inserted_count > 0:
                         self._play_new_ads_sound()
                     self.status_var.set(
@@ -1026,6 +1032,17 @@ class App(tk.Tk):
     def _refresh_row_styles(self) -> None:
         for row_id in self.tree.get_children():
             self._apply_row_style(row_id)
+
+    def _sort_rows_by_added_at_desc(self) -> None:
+        rows = list(self.tree.get_children())
+        rows.sort(
+            key=lambda rid: self.row_meta.get(rid, {}).get("published_at")
+            or self.row_meta.get(rid, {}).get("detected_at")
+            or datetime.min.replace(tzinfo=LOCAL_TZ),
+            reverse=True,
+        )
+        for index, row_id in enumerate(rows):
+            self.tree.move(row_id, "", index)
 
     def _refresh_new_badges(self) -> None:
         for row_id in self.tree.get_children():
