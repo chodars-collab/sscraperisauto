@@ -24,6 +24,8 @@ This launcher uses your installed Python path and auto-installs required package
 - Optional filters for model text, price range, and year range
 - Shows newly detected matching ads in a GUI table
 - Double-click row to open ad in browser
+- Row color aging: green (fresh), yellow (10+ min), orange (15+ min)
+- Opened ads are marked gray in the table
 
 ## Notes
 

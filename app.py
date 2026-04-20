@@ -12,6 +12,7 @@ import hashlib
 from urllib.parse import urljoin
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from email.utils import parsedate_to_datetime
 
 import feedparser
 import requests
@@ -53,6 +54,7 @@ class CarAd:
     year: Optional[int]
     price_eur: Optional[int]
     published_date: Optional[date]
+    published_at: Optional[datetime]
 
 
 class SSLvHybridWatcher:
@@ -229,7 +231,10 @@ class SSLvHybridWatcher:
 
             # Page footer often contains "Datums: dd.mm.yyyy hh:mm".
             page_text_norm = self._normalize_text(soup.get_text(" ", strip=True).lower())
-            date_match = re.search(r"datums:\s*(\d{1,2}\.\d{1,2}\.\d{4})", page_text_norm)
+            date_match = re.search(
+                r"datums:\s*(\d{1,2}\.\d{1,2}\.\d{4}(?:\s+\d{1,2}:\d{2})?)",
+                page_text_norm,
+            )
             if date_match:
                 fields["datums"] = date_match.group(1)
         except requests.RequestException:
@@ -275,6 +280,8 @@ class SSLvHybridWatcher:
         if price is None:
             price = self._extract_price_eur(text_blob)
         page_date = fields.get("datums")
+        published_at = self._extract_published_datetime(entry, published, page_date)
+        published_date = published_at.date() if published_at else None
 
         return CarAd(
             ad_id=ad_id,
@@ -285,7 +292,8 @@ class SSLvHybridWatcher:
             model=model,
             year=year,
             price_eur=price,
-            published_date=self._extract_published_date(entry, published, page_date),
+            published_date=published_date,
+            published_at=published_at,
         )
 
     def _extract_model(self, title: str) -> str:
@@ -326,21 +334,50 @@ class SSLvHybridWatcher:
             return None
         return int(value)
 
-    def _extract_published_date(self, entry, published: str, page_date: Optional[str] = None) -> Optional[date]:
+    def _extract_published_datetime(
+        self,
+        entry,
+        published: str,
+        page_date: Optional[str] = None,
+    ) -> Optional[datetime]:
         if page_date:
-            match = re.search(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b", page_date)
+            match = re.search(
+                r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2}))?\b",
+                page_date,
+            )
             if match:
                 day = int(match.group(1))
                 month = int(match.group(2))
                 year = int(match.group(3))
+                hour = int(match.group(4) or 0)
+                minute = int(match.group(5) or 0)
                 try:
-                    return date(year, month, day)
+                    return datetime(year, month, day, hour, minute, tzinfo=LOCAL_TZ)
                 except ValueError:
                     pass
 
         if getattr(entry, "published_parsed", None):
             parsed = entry.published_parsed
-            return date(parsed.tm_year, parsed.tm_mon, parsed.tm_mday)
+            try:
+                parsed_dt = parsedate_to_datetime(published) if published else None
+                if parsed_dt is not None:
+                    if parsed_dt.tzinfo is None:
+                        parsed_dt = parsed_dt.replace(tzinfo=LOCAL_TZ)
+                    return parsed_dt.astimezone(LOCAL_TZ)
+            except (TypeError, ValueError):
+                pass
+            try:
+                return datetime(
+                    parsed.tm_year,
+                    parsed.tm_mon,
+                    parsed.tm_mday,
+                    parsed.tm_hour,
+                    parsed.tm_min,
+                    parsed.tm_sec,
+                    tzinfo=LOCAL_TZ,
+                )
+            except ValueError:
+                return None
 
         match = re.search(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b", published)
         if match:
@@ -348,7 +385,7 @@ class SSLvHybridWatcher:
             month = int(match.group(2))
             year = int(match.group(3))
             try:
-                return date(year, month, day)
+                return datetime(year, month, day, tzinfo=LOCAL_TZ)
             except ValueError:
                 return None
 
@@ -419,6 +456,8 @@ class App(tk.Tk):
         self.running = False
         self.worker_thread: Optional[threading.Thread] = None
         self.events = queue.Queue()
+        self.row_meta = {}
+        self.last_color_refresh = 0.0
 
         self._build_ui()
         self.after(250, self._process_events)
@@ -504,6 +543,10 @@ class App(tk.Tk):
         self.tree.column("published", width=175, anchor=tk.W)
         self.tree.column("title", width=280, anchor=tk.W)
         self.tree.column("link", width=300, anchor=tk.W)
+        self.tree.tag_configure("age_green", background="#e6f7ea")
+        self.tree.tag_configure("age_yellow", background="#fff6cc")
+        self.tree.tag_configure("age_orange", background="#ffe6cc")
+        self.tree.tag_configure("opened", foreground="#8a8a8a")
 
         self.tree.pack(fill=tk.BOTH, expand=True)
         self.tree.bind("<Double-1>", self._open_selected_link)
@@ -621,16 +664,32 @@ class App(tk.Tk):
             if event_type == "ads":
                 ads: List[CarAd] = payload
                 if ads:
-                    now = time.strftime("%Y-%m-%d %H:%M:%S")
+                    now_label = time.strftime("%Y-%m-%d %H:%M:%S")
+                    now_dt = datetime.now(LOCAL_TZ)
                     for ad in ads:
                         price = "" if ad.price_eur is None else str(ad.price_eur)
                         year = "" if ad.year is None else str(ad.year)
-                        self.tree.insert("", 0, values=(now, ad.model, year, price, ad.published, ad.title, ad.link))
+                        row_id = self.tree.insert(
+                            "",
+                            0,
+                            values=(now_label, ad.model, year, price, ad.published, ad.title, ad.link),
+                        )
+                        self.row_meta[row_id] = {
+                            "published_at": ad.published_at,
+                            "detected_at": now_dt,
+                            "opened": False,
+                        }
+                        self._apply_row_style(row_id)
                     self.status_var.set(f"Found {len(ads)} hybrid ad(s) matching filters.")
                 else:
                     self.status_var.set("No hybrid ads matching filters in latest check.")
             elif event_type == "error":
                 self.status_var.set(f"Error: {payload}")
+
+        current = time.time()
+        if current - self.last_color_refresh >= 20:
+            self._refresh_row_styles()
+            self.last_color_refresh = current
 
         self.after(250, self._process_events)
 
@@ -641,9 +700,45 @@ class App(tk.Tk):
         if not selected:
             return
 
-        row = self.tree.item(selected[0], "values")
+        row_id = selected[0]
+        row = self.tree.item(row_id, "values")
         if len(row) >= 7 and row[6]:
             webbrowser.open(row[6])
+            if row_id in self.row_meta:
+                self.row_meta[row_id]["opened"] = True
+                self._apply_row_style(row_id)
+
+    def _refresh_row_styles(self) -> None:
+        for row_id in self.tree.get_children():
+            self._apply_row_style(row_id)
+
+    def _apply_row_style(self, row_id: str) -> None:
+        meta = self.row_meta.get(row_id)
+        if not meta:
+            return
+
+        reference_dt = meta.get("published_at") or meta.get("detected_at")
+        if reference_dt is None:
+            reference_dt = datetime.now(LOCAL_TZ)
+
+        if reference_dt.tzinfo is None:
+            reference_dt = reference_dt.replace(tzinfo=LOCAL_TZ)
+
+        now_dt = datetime.now(LOCAL_TZ)
+        age_minutes = max(0.0, (now_dt - reference_dt).total_seconds() / 60.0)
+
+        if age_minutes >= 15:
+            age_tag = "age_orange"
+        elif age_minutes >= 10:
+            age_tag = "age_yellow"
+        else:
+            age_tag = "age_green"
+
+        tags = [age_tag]
+        if meta.get("opened"):
+            tags.append("opened")
+
+        self.tree.item(row_id, tags=tags)
 
 
 if __name__ == "__main__":
