@@ -4,13 +4,14 @@ import threading
 import queue
 import time
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from typing import Optional, List
 import re
 import unicodedata
 import hashlib
 from urllib.parse import urljoin
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import feedparser
 import requests
@@ -23,6 +24,11 @@ DEFAULT_INTERVAL_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 12
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 MAX_LISTING_PAGES = 220
+try:
+    LOCAL_TZ = ZoneInfo("Europe/Riga")
+except ZoneInfoNotFoundError:
+    # Fallback to system local timezone on Windows when tzdata package is unavailable.
+    LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 
 @dataclass
@@ -67,7 +73,7 @@ class SSLvHybridWatcher:
         if filters.allow_today or filters.allow_yesterday:
             entries.extend(self._fetch_today_listing_entries(filters))
 
-        found: List[CarAd] = []
+        candidates: List[CarAd] = []
         for entry in entries:
             ad_id = self._extract_ad_id(entry)
             if not ad_id or ad_id in self.seen_ids:
@@ -75,12 +81,18 @@ class SSLvHybridWatcher:
 
             if self._is_hybrid(entry):
                 car_ad = self._build_car_ad(entry, ad_id)
-                if self._passes_filters(car_ad, filters):
-                    found.append(car_ad)
+                if self._passes_non_date_filters(car_ad, filters):
+                    candidates.append(car_ad)
 
             self.seen_ids.add(ad_id)
 
-        return found
+        if not (filters.allow_today or filters.allow_yesterday):
+            return candidates
+
+        allowed_dates = self._resolve_allowed_dates(candidates, filters)
+        if not allowed_dates:
+            return []
+        return [ad for ad in candidates if ad.published_date in allowed_dates]
 
     def _fetch_today_listing_entries(self, filters: FilterSettings) -> List[SimpleNamespace]:
         seed_pages = []
@@ -327,7 +339,7 @@ class SSLvHybridWatcher:
 
         return None
 
-    def _passes_filters(self, ad: CarAd, filters: FilterSettings) -> bool:
+    def _passes_non_date_filters(self, ad: CarAd, filters: FilterSettings) -> bool:
         if filters.model_query:
             model_query = filters.model_query.lower()
             if model_query not in ad.model.lower() and model_query not in ad.title.lower():
@@ -349,22 +361,37 @@ class SSLvHybridWatcher:
             if ad.year is None or ad.year > filters.max_year:
                 return False
 
-        if filters.allow_today or filters.allow_yesterday:
-            if ad.published_date is None:
-                return False
-
-            today = date.today()
-            yesterday = today - timedelta(days=1)
-            allowed_dates = set()
-            if filters.allow_today:
-                allowed_dates.add(today)
-            if filters.allow_yesterday:
-                allowed_dates.add(yesterday)
-
-            if ad.published_date not in allowed_dates:
-                return False
-
         return True
+
+    def _resolve_allowed_dates(self, ads: List[CarAd], filters: FilterSettings) -> set:
+        dates = sorted({ad.published_date for ad in ads if ad.published_date is not None}, reverse=True)
+        if not dates:
+            return set()
+
+        today = datetime.now(LOCAL_TZ).date()
+        yesterday = today - timedelta(days=1)
+        allowed = set()
+
+        if filters.allow_today:
+            if today in dates:
+                allowed.add(today)
+            else:
+                # Fallback to freshest available date from ss.lv when local day boundary differs.
+                allowed.add(dates[0])
+
+        if filters.allow_yesterday:
+            if yesterday in dates:
+                allowed.add(yesterday)
+            else:
+                # Some ss.lv listing ranges may skip the exact previous day; use nearest older date.
+                pivot = today
+                if allowed:
+                    pivot = max(allowed)
+                older_dates = [d for d in dates if d < pivot]
+                if older_dates:
+                    allowed.add(older_dates[0])
+
+        return allowed
 
 
 class App(tk.Tk):
