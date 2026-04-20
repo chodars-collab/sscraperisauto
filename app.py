@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from typing import Optional, List
 import re
 import unicodedata
+import hashlib
 
 import feedparser
 import requests
@@ -81,7 +82,13 @@ class SSLvHybridWatcher:
         if guid:
             return guid.strip()
 
-        return None
+        # RSS entries may not expose numeric IDs; fall back to a stable hash.
+        title = getattr(entry, "title", "") or ""
+        published = getattr(entry, "published", "") or ""
+        seed = f"{link}|{title}|{published}".strip()
+        if not seed:
+            return None
+        return hashlib.sha1(seed.encode("utf-8", errors="ignore")).hexdigest()
 
     def _normalize_text(self, text: str) -> str:
         decomposed = unicodedata.normalize("NFKD", text)
