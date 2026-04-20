@@ -50,6 +50,7 @@ class SSLvHybridWatcher:
         self.seen_ids = set()
         self.http = requests.Session()
         self.http.headers.update({"User-Agent": USER_AGENT})
+        self.fields_cache = {}
 
     def fetch_new_hybrid_ads(self, rss_url: str, filters: FilterSettings) -> List[CarAd]:
         feed = feedparser.parse(rss_url)
@@ -94,29 +95,55 @@ class SSLvHybridWatcher:
         decomposed = unicodedata.normalize("NFKD", text)
         return "".join(char for char in decomposed if not unicodedata.combining(char))
 
-    def _is_hybrid(self, entry) -> bool:
-        title = (getattr(entry, "title", "") or "").lower()
-        summary = (getattr(entry, "summary", "") or "").lower()
-        content_blob = self._normalize_text(f"{title}\n{summary}")
-
-        if "dzin" in content_blob and "hibr" in content_blob:
-            return True
-
-        link = getattr(entry, "link", "")
+    def _extract_listing_fields(self, link: str) -> dict:
         if not link:
-            return False
+            return {}
+        if link in self.fields_cache:
+            return self.fields_cache[link]
 
+        fields = {}
         try:
             response = self.http.get(link, timeout=REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "html.parser")
-            text = self._normalize_text(soup.get_text(" ", strip=True).lower())
-
-            if "dzin" in text and "hibr" in text:
-                return True
+            for row in soup.find_all("tr"):
+                tds = row.find_all("td")
+                if len(tds) < 2:
+                    continue
+                key_raw = " ".join(tds[0].get_text(" ", strip=True).split())
+                value_raw = " ".join(tds[1].get_text(" ", strip=True).split())
+                if not key_raw or not value_raw:
+                    continue
+                key_norm = self._normalize_text(key_raw.lower()).strip(" :")
+                fields[key_norm] = value_raw
         except requests.RequestException:
+            fields = {}
+
+        self.fields_cache[link] = fields
+        return fields
+
+    def _is_hybrid(self, entry) -> bool:
+        link = getattr(entry, "link", "")
+        if not link:
             return False
 
+        fields = self._extract_listing_fields(link)
+        if not fields:
+            return False
+
+        engine_value = (
+            fields.get("motors")
+            or fields.get("dzinejs")
+            or fields.get("dzinjs")
+            or ""
+        )
+        engine_norm = self._normalize_text(engine_value.lower())
+
+        # Strict engine-based hybrid detection to avoid false positives from body text.
+        if "hibr" in engine_norm or "phev" in engine_norm or "mhev" in engine_norm:
+            return True
+        if "benz" in engine_norm and "elektr" in engine_norm:
+            return True
         return False
 
     def _build_car_ad(self, entry, ad_id: str) -> CarAd:
@@ -124,16 +151,21 @@ class SSLvHybridWatcher:
         summary = getattr(entry, "summary", "")
         published = getattr(entry, "published", "")
         text_blob = f"{title} {summary}".strip()
+        link = getattr(entry, "link", "")
+        fields = self._extract_listing_fields(link)
+        model = fields.get("marka") or self._extract_model(title)
+        year = self._extract_year(fields.get("izlaiduma gads") or text_blob)
+        price = self._extract_price_eur(fields.get("cena") or text_blob)
 
         return CarAd(
             ad_id=ad_id,
             title=title,
-            link=getattr(entry, "link", ""),
+            link=link,
             published=published,
             source="feed",
-            model=self._extract_model(title),
-            year=self._extract_year(text_blob),
-            price_eur=self._extract_price_eur(text_blob),
+            model=model,
+            year=year,
+            price_eur=price,
             published_date=self._extract_published_date(entry, published),
         )
 
