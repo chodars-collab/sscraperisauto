@@ -965,7 +965,7 @@ class App(tk.Tk):
                         row_id = self.tree.insert(
                             "",
                             0,
-                            values=(added_label, ad.model, year, price, "JAUNS !!!", ad.title, ad.link),
+                            values=(added_label, ad.model, year, price, "", ad.title, ad.link),
                         )
                         self.row_meta[row_id] = {
                             "published_at": ad.published_at,
@@ -976,6 +976,7 @@ class App(tk.Tk):
                         inserted_count += 1
                         self._apply_row_style(row_id)
                     self._sort_rows_by_added_at_desc()
+                    self._refresh_new_badges()
                     if inserted_count > 0:
                         self._play_new_ads_sound()
                     self.status_var.set(
@@ -1055,7 +1056,17 @@ class App(tk.Tk):
             if meta.get("opened"):
                 row_values[4] = "APSKATIJIES"
             else:
-                row_values[4] = "JAUNS !!!" if self.new_flash_on else ""
+                reference_dt = meta.get("published_at") or meta.get("detected_at")
+                if reference_dt is None:
+                    row_values[4] = ""
+                else:
+                    if reference_dt.tzinfo is None:
+                        reference_dt = reference_dt.replace(tzinfo=LOCAL_TZ)
+                    age_hours = (datetime.now(LOCAL_TZ) - reference_dt).total_seconds() / 3600.0
+                    if age_hours <= 8:
+                        row_values[4] = "JAUNS !!!" if self.new_flash_on else ""
+                    else:
+                        row_values[4] = ""
             self.tree.item(row_id, values=row_values)
 
     def _apply_row_style(self, row_id: str) -> None:
