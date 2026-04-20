@@ -750,7 +750,7 @@ class App(tk.Tk):
         self.tree.column("link", width=300, anchor=tk.W)
         self.tree.tag_configure("age_green", background="#e6f7ea")
         self.tree.tag_configure("age_orange", background="#ffe6cc")
-        self.tree.tag_configure("opened", foreground="#8a8a8a")
+        self.tree.tag_configure("opened", background="#ececec", foreground="#6f6f6f")
 
         self.tree.pack(fill=tk.BOTH, expand=True)
         self.tree.bind("<Double-1>", self._open_selected_link)
@@ -1041,9 +1041,10 @@ class App(tk.Tk):
         else:
             age_tag = "age_green"
 
-        tags = [age_tag]
         if meta.get("opened"):
-            tags.append("opened")
+            tags = ["opened"]
+        else:
+            tags = [age_tag]
 
         self.tree.item(row_id, tags=tags)
 
