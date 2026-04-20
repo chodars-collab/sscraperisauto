@@ -32,6 +32,11 @@ MAX_LISTING_PAGES_WITH_BRAND_FILTER = 60
 MAX_ALL_TIME_PAGES = 2000
 STATE_FILE = "watcher_state.json"
 MAX_SEEN_IDS = 50000
+UI_BG = "#f3f5f9"
+CARD_BG = "#ffffff"
+ACCENT = "#0d6efd"
+TEXT_PRIMARY = "#1f2937"
+TEXT_MUTED = "#6b7280"
 try:
     LOCAL_TZ = ZoneInfo("Europe/Riga")
 except ZoneInfoNotFoundError:
@@ -618,6 +623,8 @@ class App(tk.Tk):
         self.last_new_flash_toggle = 0.0
         self.new_flash_on = True
 
+        self.configure(bg=UI_BG)
+        self._setup_styles()
         self._build_ui()
         self.after(250, self._process_events)
 
@@ -658,36 +665,54 @@ class App(tk.Tk):
     def _play_new_ads_sound(self) -> None:
         try:
             winsound.PlaySound(
-                "SystemNotification",
+                "SystemExclamation",
                 winsound.SND_ALIAS | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
             )
+            # Short follow-up ping for stronger cue.
+            self.after(160, lambda: winsound.MessageBeep(winsound.MB_OK))
         except RuntimeError:
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
 
+    def _setup_styles(self) -> None:
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure(".", background=UI_BG, foreground=TEXT_PRIMARY)
+        style.configure("Card.TLabelframe", background=CARD_BG, foreground=TEXT_PRIMARY)
+        style.configure("Card.TLabelframe.Label", background=CARD_BG, foreground=TEXT_PRIMARY, font=("Segoe UI", 10, "bold"))
+        style.configure("Premium.TFrame", background=UI_BG)
+        style.configure("Premium.TLabel", background=UI_BG, foreground=TEXT_PRIMARY)
+        style.configure("Muted.TLabel", background=UI_BG, foreground=TEXT_MUTED)
+        style.configure("Premium.TButton", padding=(12, 6), borderwidth=0, relief="flat", font=("Segoe UI", 9, "bold"))
+        style.map("Premium.TButton", background=[("active", "#1b74ff"), ("!disabled", ACCENT)], foreground=[("!disabled", "#ffffff")])
+        style.configure("Premium.TEntry", fieldbackground="#f9fafb", bordercolor="#d1d5db", lightcolor="#d1d5db", darkcolor="#d1d5db")
+        style.configure("Premium.TCombobox", fieldbackground="#f9fafb", bordercolor="#d1d5db", lightcolor="#d1d5db", darkcolor="#d1d5db")
+        style.configure("Premium.Treeview", rowheight=26, font=("Segoe UI", 9), fieldbackground=CARD_BG, background=CARD_BG)
+        style.configure("Premium.Treeview.Heading", font=("Segoe UI", 9, "bold"))
+
     def _build_ui(self) -> None:
-        root = ttk.Frame(self, padding=10)
+        root = ttk.Frame(self, padding=10, style="Premium.TFrame")
         root.pack(fill=tk.BOTH, expand=True)
 
-        config = ttk.LabelFrame(root, text="Watcher settings", padding=10)
+        config = ttk.LabelFrame(root, text="Watcher settings", padding=10, style="Card.TLabelframe")
         config.pack(fill=tk.X)
 
-        ttk.Label(config, text="RSS URL:").grid(row=0, column=0, sticky=tk.W, padx=(0, 8), pady=4)
+        ttk.Label(config, text="RSS URL:", style="Premium.TLabel").grid(row=0, column=0, sticky=tk.W, padx=(0, 8), pady=4)
         self.rss_var = tk.StringVar(value=DEFAULT_RSS_URL)
-        self.rss_entry = ttk.Entry(config, textvariable=self.rss_var, width=100)
+        self.rss_entry = ttk.Entry(config, textvariable=self.rss_var, width=100, style="Premium.TEntry")
         self.rss_entry.grid(row=0, column=1, columnspan=5, sticky=tk.EW, pady=4)
 
-        ttk.Label(config, text="Check every (sec):").grid(row=1, column=0, sticky=tk.W, padx=(0, 8), pady=4)
+        ttk.Label(config, text="Check every (sec):", style="Premium.TLabel").grid(row=1, column=0, sticky=tk.W, padx=(0, 8), pady=4)
         self.interval_var = tk.StringVar(value=str(DEFAULT_INTERVAL_SECONDS))
-        self.interval_entry = ttk.Entry(config, textvariable=self.interval_var, width=10)
+        self.interval_entry = ttk.Entry(config, textvariable=self.interval_var, width=10, style="Premium.TEntry")
         self.interval_entry.grid(row=1, column=1, sticky=tk.W, pady=4)
 
-        ttk.Label(config, text="Model contains:").grid(row=1, column=2, sticky=tk.W, padx=(16, 8), pady=4)
+        ttk.Label(config, text="Model contains:", style="Premium.TLabel").grid(row=1, column=2, sticky=tk.W, padx=(16, 8), pady=4)
         self.model_var = tk.StringVar(value="")
-        self.model_entry = ttk.Entry(config, textvariable=self.model_var, width=24)
+        self.model_entry = ttk.Entry(config, textvariable=self.model_var, width=24, style="Premium.TEntry")
         self.model_entry.grid(row=1, column=3, sticky=tk.W, pady=4)
 
-        ttk.Label(config, text="Brands:").grid(row=1, column=4, sticky=tk.W, padx=(16, 8), pady=4)
-        brands_row = ttk.Frame(config)
+        ttk.Label(config, text="Brands:", style="Premium.TLabel").grid(row=1, column=4, sticky=tk.W, padx=(16, 8), pady=4)
+        brands_row = ttk.Frame(config, style="Premium.TFrame")
         brands_row.grid(row=1, column=5, sticky=tk.W, pady=4)
         self.brand_all_var = tk.BooleanVar(value=True)
         self.brand_toyota_var = tk.BooleanVar(value=False)
@@ -702,25 +727,25 @@ class App(tk.Tk):
         self.brand_lexus_check.pack(side=tk.LEFT, padx=(8, 0))
         self.brand_honda_check.pack(side=tk.LEFT, padx=(8, 0))
 
-        ttk.Label(config, text="Price EUR:").grid(row=2, column=0, sticky=tk.W, padx=(0, 8), pady=4)
+        ttk.Label(config, text="Price EUR:", style="Premium.TLabel").grid(row=2, column=0, sticky=tk.W, padx=(0, 8), pady=4)
         self.min_price_var = tk.StringVar(value="")
         self.max_price_var = tk.StringVar(value="")
-        self.min_price_entry = ttk.Entry(config, textvariable=self.min_price_var, width=10)
-        self.max_price_entry = ttk.Entry(config, textvariable=self.max_price_var, width=10)
+        self.min_price_entry = ttk.Entry(config, textvariable=self.min_price_var, width=10, style="Premium.TEntry")
+        self.max_price_entry = ttk.Entry(config, textvariable=self.max_price_var, width=10, style="Premium.TEntry")
         self.min_price_entry.grid(row=2, column=1, sticky=tk.W, pady=4)
-        ttk.Label(config, text="to").grid(row=2, column=2, sticky=tk.W, pady=4)
+        ttk.Label(config, text="to", style="Premium.TLabel").grid(row=2, column=2, sticky=tk.W, pady=4)
         self.max_price_entry.grid(row=2, column=3, sticky=tk.W, pady=4)
 
-        ttk.Label(config, text="Year:").grid(row=3, column=0, sticky=tk.W, padx=(0, 8), pady=4)
+        ttk.Label(config, text="Year:", style="Premium.TLabel").grid(row=3, column=0, sticky=tk.W, padx=(0, 8), pady=4)
         self.min_year_var = tk.StringVar(value="")
         self.max_year_var = tk.StringVar(value="")
-        self.min_year_entry = ttk.Entry(config, textvariable=self.min_year_var, width=10)
-        self.max_year_entry = ttk.Entry(config, textvariable=self.max_year_var, width=10)
+        self.min_year_entry = ttk.Entry(config, textvariable=self.min_year_var, width=10, style="Premium.TEntry")
+        self.max_year_entry = ttk.Entry(config, textvariable=self.max_year_var, width=10, style="Premium.TEntry")
         self.min_year_entry.grid(row=3, column=1, sticky=tk.W, pady=4)
-        ttk.Label(config, text="to").grid(row=3, column=2, sticky=tk.W, pady=4)
+        ttk.Label(config, text="to", style="Premium.TLabel").grid(row=3, column=2, sticky=tk.W, pady=4)
         self.max_year_entry.grid(row=3, column=3, sticky=tk.W, pady=4)
 
-        ttk.Label(config, text="Added date:").grid(row=4, column=0, sticky=tk.W, padx=(0, 8), pady=4)
+        ttk.Label(config, text="Added date:", style="Premium.TLabel").grid(row=4, column=0, sticky=tk.W, padx=(0, 8), pady=4)
         self.today_var = tk.BooleanVar(value=False)
         self.yesterday_var = tk.BooleanVar(value=False)
         self.all_time_var = tk.BooleanVar(value=False)
@@ -731,24 +756,24 @@ class App(tk.Tk):
         self.yesterday_check.grid(row=4, column=2, sticky=tk.W, pady=4)
         self.all_time_check.grid(row=4, column=3, sticky=tk.W, pady=4)
 
-        button_row = ttk.Frame(config)
+        button_row = ttk.Frame(config, style="Premium.TFrame")
         button_row.grid(row=5, column=1, sticky=tk.W, pady=(8, 0))
-        self.start_button = ttk.Button(button_row, text="Start", command=self.start)
+        self.start_button = ttk.Button(button_row, text="Start", command=self.start, style="Premium.TButton")
         self.start_button.pack(side=tk.LEFT)
-        self.stop_button = ttk.Button(button_row, text="Stop", command=self.stop, state=tk.DISABLED)
+        self.stop_button = ttk.Button(button_row, text="Stop", command=self.stop, state=tk.DISABLED, style="Premium.TButton")
         self.stop_button.pack(side=tk.LEFT, padx=(8, 0))
 
         config.columnconfigure(5, weight=1)
 
-        status_frame = ttk.Frame(root)
+        status_frame = ttk.Frame(root, style="Premium.TFrame")
         status_frame.pack(fill=tk.X, pady=(10, 6))
-        ttk.Label(status_frame, text="Status:").pack(side=tk.LEFT)
+        ttk.Label(status_frame, text="Status:", style="Premium.TLabel").pack(side=tk.LEFT)
         self.status_var = tk.StringVar(value="Idle")
-        self.status_label = ttk.Label(status_frame, textvariable=self.status_var)
+        self.status_label = ttk.Label(status_frame, textvariable=self.status_var, style="Premium.TLabel")
         self.status_label.pack(side=tk.LEFT, padx=(6, 0))
 
         columns = ("time", "model", "year", "price", "status", "title", "link")
-        self.tree = ttk.Treeview(root, columns=columns, show="headings", height=18)
+        self.tree = ttk.Treeview(root, columns=columns, show="headings", height=18, style="Premium.Treeview")
         self.tree.heading("time", text="Added At")
         self.tree.heading("model", text="Model")
         self.tree.heading("year", text="Year")
@@ -767,6 +792,7 @@ class App(tk.Tk):
         self.tree.tag_configure("age_green", background="#e6f7ea")
         self.tree.tag_configure("age_orange", background="#ffe6cc")
         self.tree.tag_configure("opened", background="#ececec", foreground="#6f6f6f")
+        self.tree.tag_configure("new_pulse", background="#c8f7d0")
 
         self.tree.pack(fill=tk.BOTH, expand=True)
         self.tree.bind("<Double-1>", self._open_selected_link)
@@ -774,7 +800,7 @@ class App(tk.Tk):
         footer = ttk.Label(
             root,
             text="Tip: Double-click a row to open the ad in your browser.",
-            foreground="#555555",
+            style="Muted.TLabel",
         )
         footer.pack(anchor=tk.W, pady=(6, 0))
 
@@ -1068,6 +1094,7 @@ class App(tk.Tk):
                     else:
                         row_values[4] = ""
             self.tree.item(row_id, values=row_values)
+            self._apply_row_style(row_id)
 
     def _apply_row_style(self, row_id: str) -> None:
         meta = self.row_meta.get(row_id)
@@ -1092,7 +1119,11 @@ class App(tk.Tk):
         if meta.get("opened"):
             tags = ["opened"]
         else:
-            tags = [age_tag]
+            # Pulse fresh, unopened ads with a brighter green tag.
+            if age_minutes <= 8 and self.new_flash_on:
+                tags = ["new_pulse"]
+            else:
+                tags = [age_tag]
 
         self.tree.item(row_id, tags=tags)
 
