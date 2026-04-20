@@ -271,7 +271,9 @@ class SSLvHybridWatcher:
         fields = self._extract_listing_fields(link)
         model = fields.get("marka") or self._extract_model(title)
         year = self._extract_year(fields.get("izlaiduma gads") or text_blob)
-        price = self._extract_price_eur(fields.get("cena") or text_blob)
+        price = self._extract_price_from_field(fields.get("cena"))
+        if price is None:
+            price = self._extract_price_eur(text_blob)
         page_date = fields.get("datums")
 
         return CarAd(
@@ -309,6 +311,19 @@ class SSLvHybridWatcher:
         if not value:
             return None
 
+        return int(value)
+
+    def _extract_price_from_field(self, price_field: Optional[str]) -> Optional[int]:
+        if not price_field:
+            return None
+        # "Cena" field usually starts with the listing price, e.g. "19 400 Aprēķināt..."
+        # Grab the first numeric token with optional space thousand separators.
+        match = re.search(r"\b\d{1,3}(?:\s\d{3})+\b|\b\d{3,}\b", price_field)
+        if not match:
+            return None
+        value = re.sub(r"\D", "", match.group(0))
+        if not value:
+            return None
         return int(value)
 
     def _extract_published_date(self, entry, published: str, page_date: Optional[str] = None) -> Optional[date]:
