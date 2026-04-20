@@ -675,7 +675,7 @@ class App(tk.Tk):
 
         columns = ("time", "model", "year", "price", "published", "title", "link")
         self.tree = ttk.Treeview(root, columns=columns, show="headings", height=18)
-        self.tree.heading("time", text="Detected")
+        self.tree.heading("time", text="Added At")
         self.tree.heading("model", text="Model")
         self.tree.heading("year", text="Year")
         self.tree.heading("price", text="Price (EUR)")
@@ -862,15 +862,20 @@ class App(tk.Tk):
                 elapsed = float(payload.get("elapsed", 0.0))
                 interval = int(payload.get("interval", DEFAULT_INTERVAL_SECONDS))
                 if ads:
-                    now_label = time.strftime("%Y-%m-%d %H:%M:%S")
                     now_dt = datetime.now(LOCAL_TZ)
                     for ad in ads:
                         price = "" if ad.price_eur is None else str(ad.price_eur)
                         year = "" if ad.year is None else str(ad.year)
+                        added_label = ""
+                        if ad.published_at is not None:
+                            try:
+                                added_label = ad.published_at.astimezone(LOCAL_TZ).strftime("%d.%m.%Y %H:%M")
+                            except Exception:
+                                added_label = ad.published_at.strftime("%d.%m.%Y %H:%M")
                         row_id = self.tree.insert(
                             "",
                             0,
-                            values=(now_label, ad.model, year, price, ad.published, ad.title, ad.link),
+                            values=(added_label, ad.model, year, price, ad.published, ad.title, ad.link),
                         )
                         self.row_meta[row_id] = {
                             "published_at": ad.published_at,
