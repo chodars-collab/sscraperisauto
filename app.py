@@ -19,6 +19,7 @@ from pathlib import Path
 import feedparser
 import requests
 from bs4 import BeautifulSoup
+import winsound
 
 
 DEFAULT_RSS_URL = "https://www.ss.lv/lv/transport/cars/rss/"
@@ -648,6 +649,15 @@ class App(tk.Tk):
             f"matched={ads_found}. Next scan in ~{interval}s."
         )
 
+    def _play_new_ads_sound(self) -> None:
+        try:
+            winsound.PlaySound(
+                "SystemNotification",
+                winsound.SND_ALIAS | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
+            )
+        except RuntimeError:
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+
     def _build_ui(self) -> None:
         root = ttk.Frame(self, padding=10)
         root.pack(fill=tk.BOTH, expand=True)
@@ -929,6 +939,7 @@ class App(tk.Tk):
                 interval = int(payload.get("interval", DEFAULT_INTERVAL_SECONDS))
                 if ads:
                     now_dt = datetime.now(LOCAL_TZ)
+                    inserted_count = 0
                     for ad in ads:
                         if ad.ad_id in self.displayed_ad_ids:
                             continue
@@ -951,10 +962,13 @@ class App(tk.Tk):
                             "opened": False,
                         }
                         self.displayed_ad_ids.add(ad.ad_id)
+                        inserted_count += 1
                         self._apply_row_style(row_id)
+                    if inserted_count > 0:
+                        self._play_new_ads_sound()
                     self.status_var.set(
                         self._format_scan_status(
-                            ads_found=len(ads),
+                            ads_found=inserted_count,
                             summary=summary,
                             elapsed=elapsed,
                             interval=interval,
