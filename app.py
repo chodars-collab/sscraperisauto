@@ -9,6 +9,8 @@ from typing import Optional, List
 import re
 import unicodedata
 import hashlib
+from urllib.parse import urljoin
+from types import SimpleNamespace
 
 import feedparser
 import requests
@@ -16,6 +18,7 @@ from bs4 import BeautifulSoup
 
 
 DEFAULT_RSS_URL = "https://www.ss.lv/lv/transport/cars/rss/"
+DEFAULT_CARS_URL = "https://www.ss.lv/lv/transport/cars/"
 DEFAULT_INTERVAL_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 12
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -53,12 +56,18 @@ class SSLvHybridWatcher:
         self.fields_cache = {}
 
     def fetch_new_hybrid_ads(self, rss_url: str, filters: FilterSettings) -> List[CarAd]:
+        entries = []
         feed = feedparser.parse(rss_url)
         if feed.bozo:
             raise RuntimeError(f"RSS parsing failed: {feed.bozo_exception}")
+        entries.extend(feed.entries)
+
+        # In date-limited mode, also crawl ss.lv "today" pages to avoid RSS recency limits.
+        if filters.allow_today or filters.allow_yesterday:
+            entries.extend(self._fetch_today_listing_entries(filters))
 
         found: List[CarAd] = []
-        for entry in feed.entries:
+        for entry in entries:
             ad_id = self._extract_ad_id(entry)
             if not ad_id or ad_id in self.seen_ids:
                 continue
@@ -72,6 +81,45 @@ class SSLvHybridWatcher:
 
         return found
 
+    def _fetch_today_listing_entries(self, filters: FilterSettings) -> List[SimpleNamespace]:
+        pages = []
+        if filters.allow_today and not filters.allow_yesterday:
+            pages = [urljoin(DEFAULT_CARS_URL, "today/")]
+        else:
+            # "today-2" includes ads from last two days, which covers today+yesterday
+            # and also supports a strict "yesterday only" filter.
+            pages = [urljoin(DEFAULT_CARS_URL, "today-2/")]
+
+        result = []
+        seen_links = set()
+        for page_url in pages:
+            try:
+                response = self.http.get(page_url, timeout=REQUEST_TIMEOUT_SECONDS)
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, "html.parser")
+                for a in soup.find_all("a", href=True):
+                    href = a["href"].strip()
+                    if "/msg/lv/transport/cars/" not in href:
+                        continue
+                    link = urljoin("https://www.ss.lv/", href)
+                    if link in seen_links:
+                        continue
+                    seen_links.add(link)
+                    title = " ".join(a.get_text(" ", strip=True).split()) or "(No title)"
+                    result.append(
+                        SimpleNamespace(
+                            link=link,
+                            title=title,
+                            summary="",
+                            published="",
+                            id="",
+                        )
+                    )
+            except requests.RequestException:
+                continue
+
+        return result
+
     def _extract_ad_id(self, entry) -> Optional[str]:
         link = getattr(entry, "link", "")
         if link:
@@ -83,10 +131,8 @@ class SSLvHybridWatcher:
         if guid:
             return guid.strip()
 
-        # RSS entries may not expose numeric IDs; fall back to a stable hash.
-        title = getattr(entry, "title", "") or ""
-        published = getattr(entry, "published", "") or ""
-        seed = f"{link}|{title}|{published}".strip()
+        # RSS entries may not expose numeric IDs; fall back to a stable link hash.
+        seed = (link or "").strip()
         if not seed:
             return None
         return hashlib.sha1(seed.encode("utf-8", errors="ignore")).hexdigest()
