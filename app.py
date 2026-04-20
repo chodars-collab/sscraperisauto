@@ -38,7 +38,7 @@ except ZoneInfoNotFoundError:
 
 @dataclass
 class FilterSettings:
-    brand_filter: str
+    selected_brands: List[str]
     model_query: str
     min_price: Optional[int]
     max_price: Optional[int]
@@ -442,9 +442,13 @@ class SSLvHybridWatcher:
         return None
 
     def _passes_non_date_filters(self, ad: CarAd, filters: FilterSettings) -> bool:
-        if filters.brand_filter and filters.brand_filter != "All cars":
-            brand = filters.brand_filter.lower()
-            if brand not in ad.model.lower() and brand not in ad.title.lower():
+        if filters.selected_brands:
+            model_lower = ad.model.lower()
+            title_lower = ad.title.lower()
+            if not any(
+                brand.lower() in model_lower or brand.lower() in title_lower
+                for brand in filters.selected_brands
+            ):
                 return False
 
         if filters.model_query:
@@ -539,16 +543,21 @@ class App(tk.Tk):
         self.model_entry = ttk.Entry(config, textvariable=self.model_var, width=24)
         self.model_entry.grid(row=1, column=3, sticky=tk.W, pady=4)
 
-        ttk.Label(config, text="Brand:").grid(row=1, column=4, sticky=tk.W, padx=(16, 8), pady=4)
-        self.brand_var = tk.StringVar(value="All cars")
-        self.brand_combo = ttk.Combobox(
-            config,
-            textvariable=self.brand_var,
-            values=("All cars", "Toyota", "Lexus", "Honda"),
-            width=16,
-            state="readonly",
-        )
-        self.brand_combo.grid(row=1, column=5, sticky=tk.W, pady=4)
+        ttk.Label(config, text="Brands:").grid(row=1, column=4, sticky=tk.W, padx=(16, 8), pady=4)
+        brands_row = ttk.Frame(config)
+        brands_row.grid(row=1, column=5, sticky=tk.W, pady=4)
+        self.brand_all_var = tk.BooleanVar(value=True)
+        self.brand_toyota_var = tk.BooleanVar(value=False)
+        self.brand_lexus_var = tk.BooleanVar(value=False)
+        self.brand_honda_var = tk.BooleanVar(value=False)
+        self.brand_all_check = ttk.Checkbutton(brands_row, text="All cars", variable=self.brand_all_var)
+        self.brand_toyota_check = ttk.Checkbutton(brands_row, text="Toyota", variable=self.brand_toyota_var)
+        self.brand_lexus_check = ttk.Checkbutton(brands_row, text="Lexus", variable=self.brand_lexus_var)
+        self.brand_honda_check = ttk.Checkbutton(brands_row, text="Honda", variable=self.brand_honda_var)
+        self.brand_all_check.pack(side=tk.LEFT)
+        self.brand_toyota_check.pack(side=tk.LEFT, padx=(8, 0))
+        self.brand_lexus_check.pack(side=tk.LEFT, padx=(8, 0))
+        self.brand_honda_check.pack(side=tk.LEFT, padx=(8, 0))
 
         ttk.Label(config, text="Price EUR:").grid(row=2, column=0, sticky=tk.W, padx=(0, 8), pady=4)
         self.min_price_var = tk.StringVar(value="")
@@ -644,8 +653,19 @@ class App(tk.Tk):
         if min_year is not None and max_year is not None and min_year > max_year:
             raise ValueError("Min year cannot be greater than max year.")
 
+        selected_brands: List[str] = []
+        if not self.brand_all_var.get():
+            if self.brand_toyota_var.get():
+                selected_brands.append("Toyota")
+            if self.brand_lexus_var.get():
+                selected_brands.append("Lexus")
+            if self.brand_honda_var.get():
+                selected_brands.append("Honda")
+            if not selected_brands:
+                raise ValueError("Select at least one brand or enable All cars.")
+
         return FilterSettings(
-            brand_filter=self.brand_var.get().strip() or "All cars",
+            selected_brands=selected_brands,
             model_query=self.model_var.get().strip(),
             min_price=min_price,
             max_price=max_price,
@@ -700,7 +720,10 @@ class App(tk.Tk):
         self.stop_button.config(state=tk.NORMAL if running else tk.DISABLED)
         self.rss_entry.config(state=state)
         self.interval_entry.config(state=state)
-        self.brand_combo.config(state="disabled" if running else "readonly")
+        self.brand_all_check.config(state=state)
+        self.brand_toyota_check.config(state=state)
+        self.brand_lexus_check.config(state=state)
+        self.brand_honda_check.config(state=state)
         self.model_entry.config(state=state)
         self.min_price_entry.config(state=state)
         self.max_price_entry.config(state=state)

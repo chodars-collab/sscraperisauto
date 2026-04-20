@@ -21,7 +21,7 @@ This launcher uses your installed Python path and auto-installs required package
 - Polls RSS feed on a configurable interval
 - Filters ads to hybrids only
 - Date filter for ads added today and/or yesterday
-- Quick brand filter: All cars / Toyota / Lexus / Honda
+- Brand checkboxes: All cars / Toyota / Lexus / Honda (single or multi-select)
 - Optional filters for model text, price range, and year range
 - Shows newly detected matching ads in a GUI table
 - Double-click row to open ad in browser
