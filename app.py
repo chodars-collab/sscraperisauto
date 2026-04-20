@@ -116,6 +116,12 @@ class SSLvHybridWatcher:
                     continue
                 key_norm = self._normalize_text(key_raw.lower()).strip(" :")
                 fields[key_norm] = value_raw
+
+            # Page footer often contains "Datums: dd.mm.yyyy hh:mm".
+            page_text_norm = self._normalize_text(soup.get_text(" ", strip=True).lower())
+            date_match = re.search(r"datums:\s*(\d{1,2}\.\d{1,2}\.\d{4})", page_text_norm)
+            if date_match:
+                fields["datums"] = date_match.group(1)
         except requests.RequestException:
             fields = {}
 
@@ -156,6 +162,7 @@ class SSLvHybridWatcher:
         model = fields.get("marka") or self._extract_model(title)
         year = self._extract_year(fields.get("izlaiduma gads") or text_blob)
         price = self._extract_price_eur(fields.get("cena") or text_blob)
+        page_date = fields.get("datums")
 
         return CarAd(
             ad_id=ad_id,
@@ -166,7 +173,7 @@ class SSLvHybridWatcher:
             model=model,
             year=year,
             price_eur=price,
-            published_date=self._extract_published_date(entry, published),
+            published_date=self._extract_published_date(entry, published, page_date),
         )
 
     def _extract_model(self, title: str) -> str:
@@ -194,7 +201,18 @@ class SSLvHybridWatcher:
 
         return int(value)
 
-    def _extract_published_date(self, entry, published: str) -> Optional[date]:
+    def _extract_published_date(self, entry, published: str, page_date: Optional[str] = None) -> Optional[date]:
+        if page_date:
+            match = re.search(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b", page_date)
+            if match:
+                day = int(match.group(1))
+                month = int(match.group(2))
+                year = int(match.group(3))
+                try:
+                    return date(year, month, day)
+                except ValueError:
+                    pass
+
         if getattr(entry, "published_parsed", None):
             parsed = entry.published_parsed
             return date(parsed.tm_year, parsed.tm_mon, parsed.tm_mday)
