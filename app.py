@@ -1,4 +1,4 @@
-import tkinter as tk
+﻿import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 import queue
@@ -143,7 +143,7 @@ class SSLvHybridWatcher:
         return int(match.group(1))
 
     def _extract_price_eur(self, text: str) -> Optional[int]:
-        text_lower = self._normalize_text(text.lower()).replace("€", " eur ")
+        text_lower = self._normalize_text(text.lower())
         euro_match = re.search(r"(\d[\d\s]{2,})\s*(?:eur|euro)\b", text_lower)
         if not euro_match:
             euro_match = re.search(r"\bcena\s*[:\-]?\s*(\d[\d\s]{2,})\b", text_lower)
@@ -457,3 +457,4 @@ class App(tk.Tk):
 if __name__ == "__main__":
     app = App()
     app.mainloop()
+
