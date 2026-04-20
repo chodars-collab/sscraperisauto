@@ -34,6 +34,7 @@ except ZoneInfoNotFoundError:
 
 @dataclass
 class FilterSettings:
+    brand_filter: str
     model_query: str
     min_price: Optional[int]
     max_price: Optional[int]
@@ -392,6 +393,11 @@ class SSLvHybridWatcher:
         return None
 
     def _passes_non_date_filters(self, ad: CarAd, filters: FilterSettings) -> bool:
+        if filters.brand_filter and filters.brand_filter != "All cars":
+            brand = filters.brand_filter.lower()
+            if brand not in ad.model.lower() and brand not in ad.title.lower():
+                return False
+
         if filters.model_query:
             model_query = filters.model_query.lower()
             if model_query not in ad.model.lower() and model_query not in ad.title.lower():
@@ -483,6 +489,17 @@ class App(tk.Tk):
         self.model_var = tk.StringVar(value="")
         self.model_entry = ttk.Entry(config, textvariable=self.model_var, width=24)
         self.model_entry.grid(row=1, column=3, sticky=tk.W, pady=4)
+
+        ttk.Label(config, text="Brand:").grid(row=1, column=4, sticky=tk.W, padx=(16, 8), pady=4)
+        self.brand_var = tk.StringVar(value="All cars")
+        self.brand_combo = ttk.Combobox(
+            config,
+            textvariable=self.brand_var,
+            values=("All cars", "Toyota", "Lexus", "Honda"),
+            width=16,
+            state="readonly",
+        )
+        self.brand_combo.grid(row=1, column=5, sticky=tk.W, pady=4)
 
         ttk.Label(config, text="Price EUR:").grid(row=2, column=0, sticky=tk.W, padx=(0, 8), pady=4)
         self.min_price_var = tk.StringVar(value="")
@@ -579,6 +596,7 @@ class App(tk.Tk):
             raise ValueError("Min year cannot be greater than max year.")
 
         return FilterSettings(
+            brand_filter=self.brand_var.get().strip() or "All cars",
             model_query=self.model_var.get().strip(),
             min_price=min_price,
             max_price=max_price,
@@ -633,6 +651,7 @@ class App(tk.Tk):
         self.stop_button.config(state=tk.NORMAL if running else tk.DISABLED)
         self.rss_entry.config(state=state)
         self.interval_entry.config(state=state)
+        self.brand_combo.config(state="disabled" if running else "readonly")
         self.model_entry.config(state=state)
         self.min_price_entry.config(state=state)
         self.max_price_entry.config(state=state)
