@@ -28,6 +28,7 @@ REQUEST_TIMEOUT_SECONDS = 12
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 MAX_LISTING_PAGES = 120
 MAX_LISTING_PAGES_WITH_BRAND_FILTER = 60
+MAX_ALL_TIME_PAGES = 300
 STATE_FILE = "watcher_state.json"
 MAX_SEEN_IDS = 50000
 try:
@@ -47,6 +48,7 @@ class FilterSettings:
     max_year: Optional[int]
     allow_today: bool
     allow_yesterday: bool
+    all_time: bool
 
 
 @dataclass
@@ -90,7 +92,10 @@ class SSLvHybridWatcher:
         scan_summary["sources"].append("RSS")
 
         # In date-limited mode, also crawl ss.lv "today" pages to avoid RSS recency limits.
-        if filters.allow_today or filters.allow_yesterday:
+        if filters.all_time:
+            entries.extend(self._fetch_all_listing_entries(filters))
+            scan_summary["sources"].append("All-time listings")
+        elif filters.allow_today or filters.allow_yesterday:
             entries.extend(self._fetch_today_listing_entries(filters))
             scan_summary["sources"].append("Listings")
 
@@ -98,7 +103,7 @@ class SSLvHybridWatcher:
 
         candidates: List[CarAd] = []
         in_date_mode = filters.allow_today or filters.allow_yesterday
-        use_persistent_seen = not in_date_mode
+        use_persistent_seen = not (in_date_mode or filters.all_time)
         scan_seen_ids = set()
         changed = False
         for entry in entries:
@@ -198,13 +203,58 @@ class SSLvHybridWatcher:
 
         return result
 
-    def _collect_listing_page_urls(self, start_url: str, max_pages: int = MAX_LISTING_PAGES) -> List[str]:
+    def _fetch_all_listing_entries(self, filters: FilterSettings) -> List[SimpleNamespace]:
+        result = []
+        seen_links = set()
+        selected_brand_slugs = [brand.lower().replace(" ", "-") for brand in filters.selected_brands]
+        max_pages = MAX_LISTING_PAGES_WITH_BRAND_FILTER if selected_brand_slugs else MAX_ALL_TIME_PAGES
+        page_urls = self._collect_listing_page_urls(DEFAULT_CARS_URL, max_pages=max_pages, marker="/lv/transport/cars/")
+
+        for page_url in page_urls:
+            try:
+                response = self.http.get(page_url, timeout=REQUEST_TIMEOUT_SECONDS)
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, "html.parser")
+                for a in soup.find_all("a", href=True):
+                    href = a["href"].strip()
+                    if "/msg/lv/transport/cars/" not in href:
+                        continue
+                    link = urljoin("https://www.ss.lv/", href)
+                    if selected_brand_slugs:
+                        link_lower = link.lower()
+                        if not any(f"/cars/{slug}/" in link_lower for slug in selected_brand_slugs):
+                            continue
+                    if link in seen_links:
+                        continue
+                    seen_links.add(link)
+                    title = " ".join(a.get_text(" ", strip=True).split()) or "(No title)"
+                    result.append(
+                        SimpleNamespace(
+                            link=link,
+                            title=title,
+                            summary="",
+                            published="",
+                            id="",
+                        )
+                    )
+            except requests.RequestException:
+                continue
+
+        return result
+
+    def _collect_listing_page_urls(
+        self,
+        start_url: str,
+        max_pages: int = MAX_LISTING_PAGES,
+        marker: Optional[str] = None,
+    ) -> List[str]:
         page_urls = []
         seen = set()
         queue = [start_url]
 
         normalized_start = start_url.rstrip("/")
-        marker = "/today-2/" if "/today-2/" in start_url else "/today/"
+        if marker is None:
+            marker = "/today-2/" if "/today-2/" in start_url else "/today/"
         page_pattern = re.compile(r"/page\d+\.html$")
 
         while queue and len(page_urls) < max_pages:
@@ -556,6 +606,7 @@ class App(tk.Tk):
         self.worker_thread: Optional[threading.Thread] = None
         self.events = queue.Queue()
         self.row_meta = {}
+        self.displayed_ad_ids = set()
         self.last_color_refresh = 0.0
 
         self._build_ui()
@@ -567,6 +618,8 @@ class App(tk.Tk):
         return ", ".join(filters.selected_brands)
 
     def _date_scope_text(self, filters: FilterSettings) -> str:
+        if filters.all_time:
+            return "all time"
         if filters.allow_today and filters.allow_yesterday:
             return "today+yesterday"
         if filters.allow_today:
@@ -652,10 +705,13 @@ class App(tk.Tk):
         ttk.Label(config, text="Added date:").grid(row=4, column=0, sticky=tk.W, padx=(0, 8), pady=4)
         self.today_var = tk.BooleanVar(value=False)
         self.yesterday_var = tk.BooleanVar(value=False)
-        self.today_check = ttk.Checkbutton(config, text="Today", variable=self.today_var)
-        self.yesterday_check = ttk.Checkbutton(config, text="Yesterday", variable=self.yesterday_var)
+        self.all_time_var = tk.BooleanVar(value=False)
+        self.today_check = ttk.Checkbutton(config, text="'Šodien", variable=self.today_var)
+        self.yesterday_check = ttk.Checkbutton(config, text="Vakardienas sludinajumi", variable=self.yesterday_var)
+        self.all_time_check = ttk.Checkbutton(config, text="All Time", variable=self.all_time_var)
         self.today_check.grid(row=4, column=1, sticky=tk.W, pady=4)
         self.yesterday_check.grid(row=4, column=2, sticky=tk.W, pady=4)
+        self.all_time_check.grid(row=4, column=3, sticky=tk.W, pady=4)
 
         button_row = ttk.Frame(config)
         button_row.grid(row=5, column=1, sticky=tk.W, pady=(8, 0))
@@ -736,6 +792,13 @@ class App(tk.Tk):
             if not selected_brands:
                 raise ValueError("Select at least one brand or enable All cars.")
 
+        all_time = self.all_time_var.get()
+        allow_today = self.today_var.get()
+        allow_yesterday = self.yesterday_var.get()
+        if all_time:
+            allow_today = False
+            allow_yesterday = False
+
         return FilterSettings(
             selected_brands=selected_brands,
             model_query=self.model_var.get().strip(),
@@ -743,8 +806,9 @@ class App(tk.Tk):
             max_price=max_price,
             min_year=min_year,
             max_year=max_year,
-            allow_today=self.today_var.get(),
-            allow_yesterday=self.yesterday_var.get(),
+            allow_today=allow_today,
+            allow_yesterday=allow_yesterday,
+            all_time=all_time,
         )
 
     def start(self) -> None:
@@ -806,6 +870,7 @@ class App(tk.Tk):
         self.max_year_entry.config(state=state)
         self.today_check.config(state=state)
         self.yesterday_check.config(state=state)
+        self.all_time_check.config(state=state)
 
     def _worker_loop(self, rss_url: str, interval: int, filters: FilterSettings) -> None:
         while self.running:
@@ -864,6 +929,8 @@ class App(tk.Tk):
                 if ads:
                     now_dt = datetime.now(LOCAL_TZ)
                     for ad in ads:
+                        if ad.ad_id in self.displayed_ad_ids:
+                            continue
                         price = "" if ad.price_eur is None else str(ad.price_eur)
                         year = "" if ad.year is None else str(ad.year)
                         added_label = ""
@@ -882,6 +949,7 @@ class App(tk.Tk):
                             "detected_at": now_dt,
                             "opened": False,
                         }
+                        self.displayed_ad_ids.add(ad.ad_id)
                         self._apply_row_style(row_id)
                     self.status_var.set(
                         self._format_scan_status(

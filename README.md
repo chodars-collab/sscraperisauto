@@ -21,6 +21,7 @@ This launcher uses your installed Python path and auto-installs required package
 - Polls RSS feed on a configurable interval
 - Filters ads to hybrids only
 - Date filter for ads added today and/or yesterday
+- Added-date options: `'Šodien`, `Vakardienas sludinajumi`, or `All Time`
 - Brand checkboxes: All cars / Toyota / Lexus / Honda (single or multi-select)
 - Optional filters for model text, price range, and year range
 - Shows newly detected matching ads in a GUI table
@@ -38,3 +39,4 @@ This launcher uses your installed Python path and auto-installs required package
 - Seen-ad cache is stored in `watcher_state.json` to avoid reprocessing old links on every run.
 - Delete `watcher_state.json` if you want to reset the memory buffer.
 - In `Today`/`Yesterday` mode, results are recalculated each scan (not blocked by seen-cache), so date-filtered lists stay visible.
+- `All Time` scans the full cars section listing pages for available hybrid ads (can be slower).
