@@ -30,3 +30,4 @@ This launcher uses your installed Python path and auto-installs required package
 - Default RSS URL is: `https://www.ss.lv/lv/transport/cars/rss/`
 - Minimum polling interval in the app is 10 seconds.
 - On startup, the app treats all currently seen ad IDs as already processed and then tracks newly posted items from that point onward.
+- `Today`/`Yesterday` unchecked means no date limit (shows hybrid ads from any date).

@@ -306,8 +306,8 @@ class App(tk.Tk):
         self.max_year_entry.grid(row=3, column=3, sticky=tk.W, pady=4)
 
         ttk.Label(config, text="Added date:").grid(row=4, column=0, sticky=tk.W, padx=(0, 8), pady=4)
-        self.today_var = tk.BooleanVar(value=True)
-        self.yesterday_var = tk.BooleanVar(value=True)
+        self.today_var = tk.BooleanVar(value=False)
+        self.yesterday_var = tk.BooleanVar(value=False)
         self.today_check = ttk.Checkbutton(config, text="Today", variable=self.today_var)
         self.yesterday_check = ttk.Checkbutton(config, text="Yesterday", variable=self.yesterday_var)
         self.today_check.grid(row=4, column=1, sticky=tk.W, pady=4)
