@@ -27,6 +27,7 @@ This launcher uses your installed Python path and auto-installs required package
 - Double-click row to open ad in browser
 - Row color aging: green (fresh), yellow (10+ min), orange (15+ min)
 - Opened ads are marked gray in the table
+- Status bar shows live scan scope, source, counts, scan duration, and next-check timing
 
 ## Notes
 

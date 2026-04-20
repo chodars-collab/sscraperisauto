@@ -69,19 +69,31 @@ class SSLvHybridWatcher:
         self.http = requests.Session()
         self.http.headers.update({"User-Agent": USER_AGENT})
         self.fields_cache = {}
+        self.last_scan_summary = {}
         self.state_path = Path(__file__).resolve().parent / STATE_FILE
         self._load_state()
 
     def fetch_new_hybrid_ads(self, rss_url: str, filters: FilterSettings) -> List[CarAd]:
+        scan_summary = {
+            "sources": [],
+            "entries_total": 0,
+            "new_entries": 0,
+            "hybrid_candidates": 0,
+            "matched_after_filters": 0,
+        }
         entries = []
         feed = feedparser.parse(rss_url)
         if feed.bozo:
             raise RuntimeError(f"RSS parsing failed: {feed.bozo_exception}")
         entries.extend(feed.entries)
+        scan_summary["sources"].append("RSS")
 
         # In date-limited mode, also crawl ss.lv "today" pages to avoid RSS recency limits.
         if filters.allow_today or filters.allow_yesterday:
             entries.extend(self._fetch_today_listing_entries(filters))
+            scan_summary["sources"].append("Listings")
+
+        scan_summary["entries_total"] = len(entries)
 
         candidates: List[CarAd] = []
         changed = False
@@ -89,8 +101,10 @@ class SSLvHybridWatcher:
             ad_id = self._extract_ad_id(entry)
             if not ad_id or ad_id in self.seen_ids:
                 continue
+            scan_summary["new_entries"] += 1
 
             if self._is_hybrid(entry):
+                scan_summary["hybrid_candidates"] += 1
                 car_ad = self._build_car_ad(entry, ad_id)
                 if self._passes_non_date_filters(car_ad, filters):
                     candidates.append(car_ad)
@@ -102,12 +116,19 @@ class SSLvHybridWatcher:
             self._save_state()
 
         if not (filters.allow_today or filters.allow_yesterday):
+            scan_summary["matched_after_filters"] = len(candidates)
+            self.last_scan_summary = scan_summary
             return candidates
 
         allowed_dates = self._resolve_allowed_dates(candidates, filters)
         if not allowed_dates:
+            scan_summary["matched_after_filters"] = 0
+            self.last_scan_summary = scan_summary
             return []
-        return [ad for ad in candidates if ad.published_date in allowed_dates]
+        result = [ad for ad in candidates if ad.published_date in allowed_dates]
+        scan_summary["matched_after_filters"] = len(result)
+        self.last_scan_summary = scan_summary
+        return result
 
     def _fetch_today_listing_entries(self, filters: FilterSettings) -> List[SimpleNamespace]:
         seed_pages = []
@@ -521,6 +542,38 @@ class App(tk.Tk):
         self._build_ui()
         self.after(250, self._process_events)
 
+    def _brand_scope_text(self, filters: FilterSettings) -> str:
+        if not filters.selected_brands:
+            return "all brands"
+        return ", ".join(filters.selected_brands)
+
+    def _date_scope_text(self, filters: FilterSettings) -> str:
+        if filters.allow_today and filters.allow_yesterday:
+            return "today+yesterday"
+        if filters.allow_today:
+            return "today"
+        if filters.allow_yesterday:
+            return "yesterday"
+        return "any date"
+
+    def _format_scan_status(
+        self,
+        *,
+        ads_found: int,
+        summary: dict,
+        elapsed: float,
+        interval: int,
+    ) -> str:
+        sources = ", ".join(summary.get("sources", [])) or "unknown source"
+        total = summary.get("entries_total", 0)
+        new_entries = summary.get("new_entries", 0)
+        hybrids = summary.get("hybrid_candidates", 0)
+        return (
+            f"Scan done ({sources}) in {elapsed:.1f}s. "
+            f"Checked {total} entries ({new_entries} new), hybrids={hybrids}, "
+            f"matched={ads_found}. Next scan in ~{interval}s."
+        )
+
     def _build_ui(self) -> None:
         root = ttk.Frame(self, padding=10)
         root.pack(fill=tk.BOTH, expand=True)
@@ -700,7 +753,10 @@ class App(tk.Tk):
 
         self.running = True
         self._set_controls_running(True)
-        self.status_var.set("Running...")
+        self.status_var.set(
+            f"Starting watcher: brands={self._brand_scope_text(filters)}, "
+            f"date={self._date_scope_text(filters)}, interval={interval}s."
+        )
 
         self.worker_thread = threading.Thread(
             target=self._worker_loop,
@@ -734,11 +790,33 @@ class App(tk.Tk):
 
     def _worker_loop(self, rss_url: str, interval: int, filters: FilterSettings) -> None:
         while self.running:
+            self.events.put(
+                (
+                    "scan_start",
+                    {
+                        "brands": self._brand_scope_text(filters),
+                        "date_scope": self._date_scope_text(filters),
+                    },
+                )
+            )
+            started = time.time()
             try:
                 ads = self.watcher.fetch_new_hybrid_ads(rss_url, filters)
-                self.events.put(("ads", ads))
+                elapsed = time.time() - started
+                self.events.put(
+                    (
+                        "ads",
+                        {
+                            "ads": ads,
+                            "summary": dict(self.watcher.last_scan_summary or {}),
+                            "elapsed": elapsed,
+                            "interval": interval,
+                        },
+                    )
+                )
             except Exception as exc:
-                self.events.put(("error", str(exc)))
+                elapsed = time.time() - started
+                self.events.put(("error", f"{exc} (after {elapsed:.1f}s scan time)"))
 
             for _ in range(interval):
                 if not self.running:
@@ -752,8 +830,18 @@ class App(tk.Tk):
             except queue.Empty:
                 break
 
-            if event_type == "ads":
-                ads: List[CarAd] = payload
+            if event_type == "scan_start":
+                brands = payload.get("brands", "all brands")
+                date_scope = payload.get("date_scope", "any date")
+                self.status_var.set(
+                    f"Scanning now... scope={date_scope}, brands={brands}. "
+                    "Reading RSS/listing pages and ad details."
+                )
+            elif event_type == "ads":
+                ads: List[CarAd] = payload.get("ads", [])
+                summary = payload.get("summary", {})
+                elapsed = float(payload.get("elapsed", 0.0))
+                interval = int(payload.get("interval", DEFAULT_INTERVAL_SECONDS))
                 if ads:
                     now_label = time.strftime("%Y-%m-%d %H:%M:%S")
                     now_dt = datetime.now(LOCAL_TZ)
@@ -771,9 +859,23 @@ class App(tk.Tk):
                             "opened": False,
                         }
                         self._apply_row_style(row_id)
-                    self.status_var.set(f"Found {len(ads)} hybrid ad(s) matching filters.")
+                    self.status_var.set(
+                        self._format_scan_status(
+                            ads_found=len(ads),
+                            summary=summary,
+                            elapsed=elapsed,
+                            interval=interval,
+                        )
+                    )
                 else:
-                    self.status_var.set("No hybrid ads matching filters in latest check.")
+                    self.status_var.set(
+                        self._format_scan_status(
+                            ads_found=0,
+                            summary=summary,
+                            elapsed=elapsed,
+                            interval=interval,
+                        )
+                    )
             elif event_type == "error":
                 self.status_var.set(f"Error: {payload}")
 
