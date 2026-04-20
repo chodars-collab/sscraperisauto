@@ -47,7 +47,6 @@ class CarAd:
 class SSLvHybridWatcher:
     def __init__(self) -> None:
         self.seen_ids = set()
-        self.is_primed = False
         self.http = requests.Session()
         self.http.headers.update({"User-Agent": USER_AGENT})
 
@@ -62,14 +61,13 @@ class SSLvHybridWatcher:
             if not ad_id or ad_id in self.seen_ids:
                 continue
 
-            if self.is_primed and self._is_hybrid(entry):
+            if self._is_hybrid(entry):
                 car_ad = self._build_car_ad(entry, ad_id)
                 if self._passes_filters(car_ad, filters):
                     found.append(car_ad)
 
             self.seen_ids.add(ad_id)
 
-        self.is_primed = True
         return found
 
     def _extract_ad_id(self, entry) -> Optional[str]:
@@ -375,7 +373,7 @@ class App(tk.Tk):
 
         self.running = True
         self._set_controls_running(True)
-        self.status_var.set("Running... Priming feed state.")
+        self.status_var.set("Running...")
 
         self.worker_thread = threading.Thread(
             target=self._worker_loop,
@@ -431,12 +429,9 @@ class App(tk.Tk):
                         price = "" if ad.price_eur is None else str(ad.price_eur)
                         year = "" if ad.year is None else str(ad.year)
                         self.tree.insert("", 0, values=(now, ad.model, year, price, ad.published, ad.title, ad.link))
-                    self.status_var.set(f"Found {len(ads)} new hybrid ad(s) matching filters.")
+                    self.status_var.set(f"Found {len(ads)} hybrid ad(s) matching filters.")
                 else:
-                    if self.watcher.is_primed:
-                        self.status_var.set("No new hybrid ads matching filters in latest check.")
-                    else:
-                        self.status_var.set("Priming initial feed state...")
+                    self.status_var.set("No hybrid ads matching filters in latest check.")
             elif event_type == "error":
                 self.status_var.set(f"Error: {payload}")
 
