@@ -37,3 +37,4 @@ This launcher uses your installed Python path and auto-installs required package
 - `Today`/`Yesterday` unchecked means no date limit (shows hybrid ads from any date).
 - Seen-ad cache is stored in `watcher_state.json` to avoid reprocessing old links on every run.
 - Delete `watcher_state.json` if you want to reset the memory buffer.
+- In `Today`/`Yesterday` mode, results are recalculated each scan (not blocked by seen-cache), so date-filtered lists stay visible.

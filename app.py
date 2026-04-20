@@ -26,7 +26,8 @@ DEFAULT_CARS_URL = "https://www.ss.lv/lv/transport/cars/"
 DEFAULT_INTERVAL_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 12
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-MAX_LISTING_PAGES = 220
+MAX_LISTING_PAGES = 120
+MAX_LISTING_PAGES_WITH_BRAND_FILTER = 60
 STATE_FILE = "watcher_state.json"
 MAX_SEEN_IDS = 50000
 try:
@@ -96,11 +97,20 @@ class SSLvHybridWatcher:
         scan_summary["entries_total"] = len(entries)
 
         candidates: List[CarAd] = []
+        in_date_mode = filters.allow_today or filters.allow_yesterday
+        use_persistent_seen = not in_date_mode
+        scan_seen_ids = set()
         changed = False
         for entry in entries:
             ad_id = self._extract_ad_id(entry)
-            if not ad_id or ad_id in self.seen_ids:
+            if not ad_id:
                 continue
+            if use_persistent_seen:
+                if ad_id in self.seen_ids:
+                    continue
+            else:
+                if ad_id in scan_seen_ids:
+                    continue
             scan_summary["new_entries"] += 1
 
             if self._is_hybrid(entry):
@@ -109,10 +119,13 @@ class SSLvHybridWatcher:
                 if self._passes_non_date_filters(car_ad, filters):
                     candidates.append(car_ad)
 
-            self._mark_seen(ad_id)
-            changed = True
+            if use_persistent_seen:
+                self._mark_seen(ad_id)
+                changed = True
+            else:
+                scan_seen_ids.add(ad_id)
 
-        if changed:
+        if use_persistent_seen and changed:
             self._save_state()
 
         if not (filters.allow_today or filters.allow_yesterday):
@@ -147,9 +160,11 @@ class SSLvHybridWatcher:
 
         result = []
         seen_links = set()
+        selected_brand_slugs = [brand.lower().replace(" ", "-") for brand in filters.selected_brands]
+        max_pages = MAX_LISTING_PAGES_WITH_BRAND_FILTER if selected_brand_slugs else MAX_LISTING_PAGES
         page_urls = []
         for seed in seed_pages:
-            page_urls.extend(self._collect_listing_page_urls(seed))
+            page_urls.extend(self._collect_listing_page_urls(seed, max_pages=max_pages))
 
         for page_url in page_urls:
             try:
@@ -161,6 +176,10 @@ class SSLvHybridWatcher:
                     if "/msg/lv/transport/cars/" not in href:
                         continue
                     link = urljoin("https://www.ss.lv/", href)
+                    if selected_brand_slugs:
+                        link_lower = link.lower()
+                        if not any(f"/cars/{slug}/" in link_lower for slug in selected_brand_slugs):
+                            continue
                     if link in seen_links:
                         continue
                     seen_links.add(link)
@@ -179,7 +198,7 @@ class SSLvHybridWatcher:
 
         return result
 
-    def _collect_listing_page_urls(self, start_url: str) -> List[str]:
+    def _collect_listing_page_urls(self, start_url: str, max_pages: int = MAX_LISTING_PAGES) -> List[str]:
         page_urls = []
         seen = set()
         queue = [start_url]
@@ -188,7 +207,7 @@ class SSLvHybridWatcher:
         marker = "/today-2/" if "/today-2/" in start_url else "/today/"
         page_pattern = re.compile(r"/page\d+\.html$")
 
-        while queue and len(page_urls) < MAX_LISTING_PAGES:
+        while queue and len(page_urls) < max_pages:
             current = queue.pop(0)
             if current in seen:
                 continue
