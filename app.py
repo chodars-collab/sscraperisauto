@@ -608,6 +608,8 @@ class App(tk.Tk):
         self.row_meta = {}
         self.displayed_ad_ids = set()
         self.last_color_refresh = 0.0
+        self.last_new_flash_toggle = 0.0
+        self.new_flash_on = True
 
         self._build_ui()
         self.after(250, self._process_events)
@@ -729,13 +731,13 @@ class App(tk.Tk):
         self.status_label = ttk.Label(status_frame, textvariable=self.status_var)
         self.status_label.pack(side=tk.LEFT, padx=(6, 0))
 
-        columns = ("time", "model", "year", "price", "published", "title", "link")
+        columns = ("time", "model", "year", "price", "status", "title", "link")
         self.tree = ttk.Treeview(root, columns=columns, show="headings", height=18)
         self.tree.heading("time", text="Added At")
         self.tree.heading("model", text="Model")
         self.tree.heading("year", text="Year")
         self.tree.heading("price", text="Price (EUR)")
-        self.tree.heading("published", text="Published")
+        self.tree.heading("status", text="Statuss")
         self.tree.heading("title", text="Title")
         self.tree.heading("link", text="Link")
 
@@ -743,11 +745,10 @@ class App(tk.Tk):
         self.tree.column("model", width=160, anchor=tk.W)
         self.tree.column("year", width=70, anchor=tk.W)
         self.tree.column("price", width=95, anchor=tk.W)
-        self.tree.column("published", width=175, anchor=tk.W)
+        self.tree.column("status", width=120, anchor=tk.W)
         self.tree.column("title", width=280, anchor=tk.W)
         self.tree.column("link", width=300, anchor=tk.W)
         self.tree.tag_configure("age_green", background="#e6f7ea")
-        self.tree.tag_configure("age_yellow", background="#fff6cc")
         self.tree.tag_configure("age_orange", background="#ffe6cc")
         self.tree.tag_configure("opened", foreground="#8a8a8a")
 
@@ -942,7 +943,7 @@ class App(tk.Tk):
                         row_id = self.tree.insert(
                             "",
                             0,
-                            values=(added_label, ad.model, year, price, ad.published, ad.title, ad.link),
+                            values=(added_label, ad.model, year, price, "JAUNS !!!", ad.title, ad.link),
                         )
                         self.row_meta[row_id] = {
                             "published_at": ad.published_at,
@@ -976,6 +977,11 @@ class App(tk.Tk):
             self._refresh_row_styles()
             self.last_color_refresh = current
 
+        if current - self.last_new_flash_toggle >= 0.8:
+            self.new_flash_on = not self.new_flash_on
+            self._refresh_new_badges()
+            self.last_new_flash_toggle = current
+
         self.after(250, self._process_events)
 
     def _open_selected_link(self, _event) -> None:
@@ -991,11 +997,29 @@ class App(tk.Tk):
             webbrowser.open(row[6])
             if row_id in self.row_meta:
                 self.row_meta[row_id]["opened"] = True
+                row_values = list(self.tree.item(row_id, "values"))
+                if len(row_values) >= 5:
+                    row_values[4] = "APSKATIJIES"
+                    self.tree.item(row_id, values=row_values)
                 self._apply_row_style(row_id)
 
     def _refresh_row_styles(self) -> None:
         for row_id in self.tree.get_children():
             self._apply_row_style(row_id)
+
+    def _refresh_new_badges(self) -> None:
+        for row_id in self.tree.get_children():
+            meta = self.row_meta.get(row_id)
+            if not meta:
+                continue
+            row_values = list(self.tree.item(row_id, "values"))
+            if len(row_values) < 5:
+                continue
+            if meta.get("opened"):
+                row_values[4] = "APSKATIJIES"
+            else:
+                row_values[4] = "JAUNS !!!" if self.new_flash_on else ""
+            self.tree.item(row_id, values=row_values)
 
     def _apply_row_style(self, row_id: str) -> None:
         meta = self.row_meta.get(row_id)
@@ -1012,10 +1036,8 @@ class App(tk.Tk):
         now_dt = datetime.now(LOCAL_TZ)
         age_minutes = max(0.0, (now_dt - reference_dt).total_seconds() / 60.0)
 
-        if age_minutes >= 15:
+        if age_minutes >= 30:
             age_tag = "age_orange"
-        elif age_minutes >= 10:
-            age_tag = "age_yellow"
         else:
             age_tag = "age_green"
 
