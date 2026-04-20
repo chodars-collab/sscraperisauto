@@ -9,10 +9,12 @@ from typing import Optional, List
 import re
 import unicodedata
 import hashlib
+import json
 from urllib.parse import urljoin
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 
 import feedparser
 import requests
@@ -25,6 +27,8 @@ DEFAULT_INTERVAL_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 12
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 MAX_LISTING_PAGES = 220
+STATE_FILE = "watcher_state.json"
+MAX_SEEN_IDS = 50000
 try:
     LOCAL_TZ = ZoneInfo("Europe/Riga")
 except ZoneInfoNotFoundError:
@@ -61,9 +65,12 @@ class CarAd:
 class SSLvHybridWatcher:
     def __init__(self) -> None:
         self.seen_ids = set()
+        self.seen_order = []
         self.http = requests.Session()
         self.http.headers.update({"User-Agent": USER_AGENT})
         self.fields_cache = {}
+        self.state_path = Path(__file__).resolve().parent / STATE_FILE
+        self._load_state()
 
     def fetch_new_hybrid_ads(self, rss_url: str, filters: FilterSettings) -> List[CarAd]:
         entries = []
@@ -77,6 +84,7 @@ class SSLvHybridWatcher:
             entries.extend(self._fetch_today_listing_entries(filters))
 
         candidates: List[CarAd] = []
+        changed = False
         for entry in entries:
             ad_id = self._extract_ad_id(entry)
             if not ad_id or ad_id in self.seen_ids:
@@ -87,7 +95,11 @@ class SSLvHybridWatcher:
                 if self._passes_non_date_filters(car_ad, filters):
                     candidates.append(car_ad)
 
-            self.seen_ids.add(ad_id)
+            self._mark_seen(ad_id)
+            changed = True
+
+        if changed:
+            self._save_state()
 
         if not (filters.allow_today or filters.allow_yesterday):
             return candidates
@@ -203,6 +215,43 @@ class SSLvHybridWatcher:
         if not seed:
             return None
         return hashlib.sha1(seed.encode("utf-8", errors="ignore")).hexdigest()
+
+    def _mark_seen(self, ad_id: str) -> None:
+        if ad_id in self.seen_ids:
+            return
+        self.seen_ids.add(ad_id)
+        self.seen_order.append(ad_id)
+        overflow = len(self.seen_order) - MAX_SEEN_IDS
+        if overflow > 0:
+            for old_id in self.seen_order[:overflow]:
+                self.seen_ids.discard(old_id)
+            self.seen_order = self.seen_order[overflow:]
+
+    def _load_state(self) -> None:
+        if not self.state_path.exists():
+            return
+        try:
+            raw = json.loads(self.state_path.read_text(encoding="utf-8"))
+            ids = raw.get("seen_ids", [])
+            if isinstance(ids, list):
+                ids = [str(i).strip() for i in ids if str(i).strip()]
+                if len(ids) > MAX_SEEN_IDS:
+                    ids = ids[-MAX_SEEN_IDS:]
+                self.seen_order = ids
+                self.seen_ids = set(ids)
+        except (OSError, json.JSONDecodeError):
+            self.seen_ids = set()
+            self.seen_order = []
+
+    def _save_state(self) -> None:
+        payload = {"seen_ids": self.seen_order[-MAX_SEEN_IDS:]}
+        try:
+            self.state_path.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
     def _normalize_text(self, text: str) -> str:
         decomposed = unicodedata.normalize("NFKD", text)
