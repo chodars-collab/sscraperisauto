@@ -22,6 +22,7 @@ DEFAULT_CARS_URL = "https://www.ss.lv/lv/transport/cars/"
 DEFAULT_INTERVAL_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 12
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+MAX_LISTING_PAGES = 220
 
 
 @dataclass
@@ -82,17 +83,27 @@ class SSLvHybridWatcher:
         return found
 
     def _fetch_today_listing_entries(self, filters: FilterSettings) -> List[SimpleNamespace]:
-        pages = []
+        seed_pages = []
         if filters.allow_today and not filters.allow_yesterday:
-            pages = [urljoin(DEFAULT_CARS_URL, "today/")]
+            seed_pages = [urljoin(DEFAULT_CARS_URL, "today/")]
+        elif filters.allow_today and filters.allow_yesterday:
+            # Combine both sources so we don't miss "today" ads while also including yesterday.
+            seed_pages = [
+                urljoin(DEFAULT_CARS_URL, "today/"),
+                urljoin(DEFAULT_CARS_URL, "today-2/"),
+            ]
         else:
             # "today-2" includes ads from last two days, which covers today+yesterday
             # and also supports a strict "yesterday only" filter.
-            pages = [urljoin(DEFAULT_CARS_URL, "today-2/")]
+            seed_pages = [urljoin(DEFAULT_CARS_URL, "today-2/")]
 
         result = []
         seen_links = set()
-        for page_url in pages:
+        page_urls = []
+        for seed in seed_pages:
+            page_urls.extend(self._collect_listing_page_urls(seed))
+
+        for page_url in page_urls:
             try:
                 response = self.http.get(page_url, timeout=REQUEST_TIMEOUT_SECONDS)
                 response.raise_for_status()
@@ -119,6 +130,47 @@ class SSLvHybridWatcher:
                 continue
 
         return result
+
+    def _collect_listing_page_urls(self, start_url: str) -> List[str]:
+        page_urls = []
+        seen = set()
+        queue = [start_url]
+
+        normalized_start = start_url.rstrip("/")
+        marker = "/today-2/" if "/today-2/" in start_url else "/today/"
+        page_pattern = re.compile(r"/page\d+\.html$")
+
+        while queue and len(page_urls) < MAX_LISTING_PAGES:
+            current = queue.pop(0)
+            if current in seen:
+                continue
+            seen.add(current)
+            page_urls.append(current)
+
+            try:
+                response = self.http.get(current, timeout=REQUEST_TIMEOUT_SECONDS)
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, "html.parser")
+            except requests.RequestException:
+                continue
+
+            for a in soup.find_all("a", href=True):
+                href = a["href"].strip()
+                absolute = urljoin("https://www.ss.lv/", href)
+                clean = absolute.split("?", 1)[0].rstrip("/")
+
+                if marker not in clean:
+                    continue
+
+                is_root = clean == normalized_start
+                is_paged = bool(page_pattern.search(clean))
+                if not is_root and not is_paged:
+                    continue
+
+                if clean not in seen and clean not in queue:
+                    queue.append(clean)
+
+        return page_urls
 
     def _extract_ad_id(self, entry) -> Optional[str]:
         link = getattr(entry, "link", "")
