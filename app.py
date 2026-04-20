@@ -29,7 +29,7 @@ REQUEST_TIMEOUT_SECONDS = 12
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 MAX_LISTING_PAGES = 120
 MAX_LISTING_PAGES_WITH_BRAND_FILTER = 60
-MAX_ALL_TIME_PAGES = 300
+MAX_ALL_TIME_PAGES = 2000
 STATE_FILE = "watcher_state.json"
 MAX_SEEN_IDS = 50000
 try:
@@ -133,6 +133,12 @@ class SSLvHybridWatcher:
 
         if use_persistent_seen and changed:
             self._save_state()
+
+        if filters.all_time:
+            # Explicit all-time mode: no date narrowing at all.
+            scan_summary["matched_after_filters"] = len(candidates)
+            self.last_scan_summary = scan_summary
+            return candidates
 
         if not (filters.allow_today or filters.allow_yesterday):
             scan_summary["matched_after_filters"] = len(candidates)

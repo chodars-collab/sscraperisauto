@@ -40,3 +40,5 @@ This launcher uses your installed Python path and auto-installs required package
 - Delete `watcher_state.json` if you want to reset the memory buffer.
 - In `Today`/`Yesterday` mode, results are recalculated each scan (not blocked by seen-cache), so date-filtered lists stay visible.
 - `All Time` scans the full cars section listing pages for available hybrid ads (can be slower).
+- `All Time` does not apply any date filter and includes hybrid ads from all available dates.
+- `All cars` means no brand restriction (Toyota/Lexus/Honda checkboxes are ignored when `All cars` is enabled).
