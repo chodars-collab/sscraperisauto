@@ -2,27 +2,26 @@
 
 Python GUI app that checks `ss.lv` car RSS feed and shows only newly detected hybrid ads (`Dzinējs = Hibrīds`).
 
+## Quick Start (Recommended)
+
+1. Double-click `run_app.bat`
+2. Click `Start` in the app
+
+This launcher uses your installed Python path and auto-installs required packages.
+
+## Manual Run
+
+```powershell
+& "C:\Users\choda\AppData\Local\Programs\Python\Python312\python.exe" -m pip install -r requirements.txt
+& "C:\Users\choda\AppData\Local\Programs\Python\Python312\python.exe" app.py
+```
+
 ## Features
 
 - Polls RSS feed on a configurable interval
 - Filters ads to hybrids only
 - Shows newly detected matching ads in a GUI table
 - Double-click row to open ad in browser
-
-## Setup
-
-1. Install Python 3.10+.
-2. Install dependencies:
-
-```powershell
-pip install -r requirements.txt
-```
-
-3. Run the app:
-
-```powershell
-python app.py
-```
 
 ## Notes
 
